@@ -4,6 +4,7 @@ import time
 import requests
 import threading
 from dotenv import load_dotenv
+from plyer import notification  # <-- Nueva importación para notificaciones nativas
 
 load_dotenv()
 
@@ -12,7 +13,6 @@ class MultiIMAPMonitor:
         self.api_url = "http://127.0.0.1:5000/api/v1/analyze"
         self.accounts = []
         
-        # Configurar Gmail si existe en el .env
         gmail_user = os.getenv("GMAIL_USER")
         gmail_pass = os.getenv("GMAIL_PASS")
         if gmail_user and gmail_pass and "tu_clave" not in gmail_pass:
@@ -24,7 +24,6 @@ class MultiIMAPMonitor:
                 "spam_folder": '"[Gmail]/Spam"'
             })
 
-        # Configurar Outlook si existe en el .env
         outlook_user = os.getenv("OUTLOOK_USER")
         outlook_pass = os.getenv("OUTLOOK_PASS")
         if outlook_user and outlook_pass and "tu_clave" not in outlook_pass:
@@ -37,7 +36,6 @@ class MultiIMAPMonitor:
             })
 
     def monitor_account(self, acc, interval=30):
-        """Bucle de monitoreo independiente para cada proveedor de correo."""
         print(f"[*] Iniciando hilo de vigilancia para {acc['name']} ({acc['user']})...")
         while True:
             try:
@@ -81,10 +79,19 @@ class MultiIMAPMonitor:
 
     def move_to_spam(self, mail_conn, email_id, spam_folder, acc_name):
         try:
+            # 1. Mover el correo y borrar el original
             mail_conn.copy(email_id, spam_folder)
             mail_conn.store(email_id, '+FLAGS', '\\Deleted')
             mail_conn.expunge()
             print(f" [!] [{acc_name}] ACCIÓN DEFENSIVA: Correo crítico neutralizado y movido a {spam_folder}.")
+            
+            # 2. Disparar notificación de Windows
+            notification.notify(
+                title="ChainMail: Amenaza Interceptada",
+                message=f"Se detectó un ataque de phishing en {acc_name}. El correo ha sido movido a la bóveda de cuarentena.",
+                app_name="ChainMail Phishing Engine",
+                timeout=8  # La notificación desaparecerá en 8 segundos
+            )
         except Exception as e:
             print(f" [-] [{acc_name}] No se pudo mover el correo a Spam: {e}")
 
@@ -93,7 +100,6 @@ class MultiIMAPMonitor:
             print("[-] ADVERTENCIA: No hay cuentas configuradas correctamente en el archivo .env.")
             return
         
-        # Lanzar un hilo independiente por cada cuenta configurada
         threads = []
         for acc in self.accounts:
             t = threading.Thread(target=self.monitor_account, args=(acc, interval), daemon=True)

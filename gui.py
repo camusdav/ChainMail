@@ -1,3 +1,4 @@
+import os
 import customtkinter as ctk
 from tkinter import messagebox, filedialog
 import requests
@@ -12,6 +13,10 @@ class PhishingAnalyzerGUI:
         self.root = root
         self.root.title("ChainMail - Centro de Operaciones")
         self.root.geometry("780x740")
+        
+        # Asignar el nuevo ícono a la ventana de la aplicación (con validación de seguridad)
+        if os.path.exists("icon.ico"):
+            self.root.iconbitmap("icon.ico")
         
         # Fondo general de la aplicación (Morado profundo)
         self.root.configure(fg_color="#180A2B")
