@@ -32,7 +32,7 @@ class PhishingAnalyzerGUI:
         self.build_scan_tab()
         self.build_history_tab()
 
-        self.lbl_dev = ctk.CTkLabel(self.root, text="Desarrollado por: David Fernando Medina Neires", font=ctk.CTkFont(size=10, slant="italic"), text_color="gray")
+        self.lbl_dev = ctk.CTkLabel(self.root, text="@Camus_Dav", font=ctk.CTkFont(size=10, slant="italic"), text_color="gray")
         self.lbl_dev.pack(side="bottom", pady=10)
 
     def build_scan_tab(self):
