@@ -4,7 +4,7 @@ import time
 import requests
 import threading
 from dotenv import load_dotenv
-from plyer import notification  # <-- Nueva importación para notificaciones nativas
+from plyer import notification
 
 load_dotenv()
 
@@ -36,7 +36,12 @@ class MultiIMAPMonitor:
             })
 
     def monitor_account(self, acc, interval=30):
+        """Bucle de monitoreo independiente para múltiples carpetas."""
         print(f"[*] Iniciando hilo de vigilancia para {acc['name']} ({acc['user']})...")
+        
+        # Definir las carpetas a patrullar en cada ciclo
+        folders_to_scan = ['inbox', acc['spam_folder']]
+        
         while True:
             try:
                 mail = imaplib.IMAP4_SSL(acc['server'])
@@ -44,33 +49,49 @@ class MultiIMAPMonitor:
                 print(f"[+] Conexión establecida con éxito en {acc['name']}.")
                 
                 while True:
-                    mail.select('inbox')
-                    status, messages = mail.search(None, 'UNSEEN')
-                    
-                    if status == 'OK':
-                        mail_ids = messages[0].split()
-                        if mail_ids:
-                            print(f"\n[*] [{acc['name']}] ¡Nuevos correos detectados: {len(mail_ids)}!")
-                            for num in mail_ids:
-                                typ, data = mail.fetch(num, '(RFC822)')
-                                raw_email = data[0][1].decode('utf-8', errors='ignore')
-                                
-                                payload = {
-                                    "email_content": raw_email,
-                                    "source": acc['name'],
-                                    "status": "Analizado"
-                                }
-                                try:
-                                    response = requests.post(self.api_url, json=payload, timeout=15)
-                                    if response.status_code == 200:
-                                        res = response.json()
-                                        risk = res.get('risk_level')
-                                        print(f" -> [{acc['name']}] ID {num.decode()}: Riesgo -> {risk}")
+                    for folder in folders_to_scan:
+                        try:
+                            # Seleccionar la carpeta actual
+                            status, _ = mail.select(folder)
+                            if status != 'OK':
+                                continue
+
+                            # Buscar únicamente correos no leídos
+                            status, messages = mail.search(None, 'UNSEEN')
+                            
+                            if status == 'OK':
+                                mail_ids = messages[0].split()
+                                if mail_ids:
+                                    nombre_carpeta = "Inbox" if folder == 'inbox' else "Spam"
+                                    print(f"\n[*] [{acc['name']} - {nombre_carpeta}] ¡Nuevos correos detectados: {len(mail_ids)}!")
+                                    
+                                    for num in mail_ids:
+                                        typ, data = mail.fetch(num, '(RFC822)')
+                                        raw_email = data[0][1].decode('utf-8', errors='ignore')
                                         
-                                        if risk == "CRÍTICO (Posible Phishing)":
-                                            self.move_to_spam(mail, num, acc['spam_folder'], acc['name'])
-                                except Exception as api_err:
-                                    print(f"[-] [{acc['name']}] Error comunicando con la API ChainMail: {api_err}")
+                                        # Identificar el origen exacto para el panel de control
+                                        origen_detallado = f"{acc['name']} ({nombre_carpeta})"
+                                        
+                                        payload = {
+                                            "email_content": raw_email,
+                                            "source": origen_detallado,
+                                            "status": "Analizado"
+                                        }
+                                        
+                                        try:
+                                            response = requests.post(self.api_url, json=payload, timeout=15)
+                                            if response.status_code == 200:
+                                                res = response.json()
+                                                risk = res.get('risk_level')
+                                                print(f" -> [{acc['name']}] ID {num.decode()}: Riesgo -> {risk}")
+                                                
+                                                # Acción defensiva: Solo mover a Spam si el correo CRÍTICO estaba en el Inbox
+                                                if risk == "CRÍTICO (Posible Phishing)" and folder == 'inbox':
+                                                    self.move_to_spam(mail, num, acc['spam_folder'], acc['name'])
+                                        except Exception as api_err:
+                                            print(f"[-] [{acc['name']}] Error comunicando con la API ChainMail: {api_err}")
+                        except Exception as e:
+                            print(f"[-] Error leyendo la carpeta {folder}: {e}")
                     
                     time.sleep(interval)
             except Exception as e:

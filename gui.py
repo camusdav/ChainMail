@@ -1,301 +1,234 @@
 import os
-import customtkinter as ctk
-from tkinter import messagebox, filedialog
-import requests
 import datetime
+import requests
 from fpdf import FPDF
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
+                             QLabel, QTextEdit, QPushButton, QTabWidget, QTableWidget, 
+                             QTableWidgetItem, QHeaderView, QMessageBox, QFileDialog)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtGui import QIcon, QFont, QColor
 
-# Forzamos modo oscuro para que los colores neón/morados resalten
-ctk.set_appearance_mode("dark")
+class AnalyzeWorker(QThread):
+    finished = pyqtSignal(dict)
+    error = pyqtSignal(str)
 
-class PhishingAnalyzerGUI:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("ChainMail - Centro de Operaciones")
-        self.root.geometry("780x740")
+    def __init__(self, api_url, email_content):
+        super().__init__()
+        self.api_url = api_url
+        self.email_content = email_content
+
+    def run(self):
+        try:
+            payload = {"email_content": self.email_content, "source": "Manual"}
+            response = requests.post(self.api_url, json=payload, timeout=15)
+            if response.status_code == 200:
+                self.finished.emit(response.json())
+            else:
+                self.error.emit(f"Código de error {response.status_code}")
+        except Exception as e:
+            self.error.emit(str(e))
+
+class PhishingAnalyzerGUI(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("ChainMail - Centro de Operaciones")
+        self.resize(800, 750)
         
-        # Asignar el nuevo ícono a la ventana de la aplicación (con validación de seguridad)
         if os.path.exists("icon.ico"):
-            self.root.iconbitmap("icon.ico")
-        
-        # Fondo general de la aplicación (Morado profundo)
-        self.root.configure(fg_color="#180A2B")
-        
+            self.setWindowIcon(QIcon("icon.ico"))
+            
         self.api_url = "http://127.0.0.1:5000/api/v1/analyze"
-        self.shutdown_url = "http://127.0.0.1:5000/api/v1/shutdown"
         self.history_url = "http://127.0.0.1:5000/api/v1/history"
         self.clear_history_url = "http://127.0.0.1:5000/api/v1/history/clear"
-
+        self.shutdown_url = "http://127.0.0.1:5000/api/v1/shutdown"
         self.last_scan_data = None
-        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
-        self.create_widgets()
 
-    def create_widgets(self):
-        # Título estilo Frutiger con color Cyan brillante
-        self.lbl_title = ctk.CTkLabel(
-            self.root, 
-            text="ChainMail: Phishing Engine", 
-            font=ctk.CTkFont(family="Trebuchet MS", size=28, weight="bold"),
-            text_color="#00F0FF"
-        )
-        self.lbl_title.pack(pady=(20, 10))
+        self.setup_ui()
+        self.apply_frutiger_aero_theme()
+        
+    def setup_ui(self):
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        main_layout = QVBoxLayout(central_widget)
+        main_layout.setContentsMargins(20, 20, 20, 20)
 
-        # Contenedor principal de pestañas (simulando cristal oscuro morado)
-        self.tabview = ctk.CTkTabview(
-            self.root, 
-            width=720, 
-            height=580,
-            fg_color="#281347",
-            segmented_button_fg_color="#180A2B",
-            segmented_button_selected_color="#9D4EDD",
-            segmented_button_selected_hover_color="#C77DFF",
-            segmented_button_unselected_color="#180A2B",
-            text_color="#FFFFFF"
-        )
-        self.tabview.pack(padx=20, pady=10, fill="both", expand=True)
+        # Título
+        self.lbl_title = QLabel("ChainMail: Phishing Engine")
+        self.lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_title.setObjectName("titleLabel")
+        main_layout.addWidget(self.lbl_title)
 
-        self.tab_scan = self.tabview.add("Escáner Manual")
-        self.tab_history = self.tabview.add("Centro de Monitoreo")
+        # Pestañas
+        self.tabs = QTabWidget()
+        self.tab_scan = QWidget()
+        self.tab_history = QWidget()
+        
+        self.tabs.addTab(self.tab_scan, "Escáner Manual")
+        self.tabs.addTab(self.tab_history, "Centro de Monitoreo")
+        main_layout.addWidget(self.tabs)
 
         self.build_scan_tab()
         self.build_history_tab()
 
-        self.lbl_dev = ctk.CTkLabel(
-            self.root, 
-            text="@Camus_Dav", 
-            font=ctk.CTkFont(family="Trebuchet MS", size=11, slant="italic"), 
-            text_color="#9D4EDD"
-        )
-        self.lbl_dev.pack(side="bottom", pady=10)
+        # Footer
+        self.lbl_dev = QLabel("@Camus_Dav")
+        self.lbl_dev.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_dev.setObjectName("footerLabel")
+        main_layout.addWidget(self.lbl_dev)
 
     def build_scan_tab(self):
-        self.lbl_inst = ctk.CTkLabel(self.tab_scan, text="Código fuente (.eml) o texto plano del correo:", font=("Trebuchet MS", 14))
-        self.lbl_inst.pack(anchor="w", padx=20, pady=(10, 0))
-
-        # Caja de texto con bordes morados vibrantes
-        self.txt_email = ctk.CTkTextbox(
-            self.tab_scan, 
-            height=180, 
-            font=ctk.CTkFont(family="Consolas", size=12),
-            fg_color="#361A5C",
-            border_color="#7B2CBF",
-            border_width=2,
-            corner_radius=15
-        )
-        self.txt_email.pack(pady=10, padx=20, fill="x")
-
-        self.frame_buttons = ctk.CTkFrame(self.tab_scan, fg_color="transparent")
-        self.frame_buttons.pack(pady=5)
+        layout = QVBoxLayout(self.tab_scan)
         
-        # Botones estilo píldora de los 2000s
-        self.btn_analyze = ctk.CTkButton(
-            self.frame_buttons, 
-            text="Escanear Amenazas", 
-            command=self.analyze_email, 
-            fg_color="#9D4EDD", 
-            hover_color="#C77DFF",
-            font=("Trebuchet MS", 13, "bold"),
-            corner_radius=20,
-            border_width=1,
-            border_color="#FFFFFF"
-        )
-        self.btn_analyze.pack(side="left", padx=10)
-        
-        self.btn_clear = ctk.CTkButton(
-            self.frame_buttons, 
-            text="Limpiar", 
-            command=self.clear_fields, 
-            fg_color="#FF006E", 
-            hover_color="#FF4793",
-            font=("Trebuchet MS", 13, "bold"),
-            corner_radius=20,
-            border_width=1,
-            border_color="#FFFFFF"
-        )
-        self.btn_clear.pack(side="left", padx=10)
+        self.lbl_inst = QLabel("Código fuente (.eml) o texto plano del correo:")
+        layout.addWidget(self.lbl_inst)
 
-        self.btn_export = ctk.CTkButton(
-            self.frame_buttons, 
-            text="Exportar Reporte PDF", 
-            command=self.export_to_pdf, 
-            fg_color="#00F0FF", 
-            hover_color="#80F8FF", 
-            text_color="#000000",
-            font=("Trebuchet MS", 13, "bold"),
-            corner_radius=20,
-            border_width=1,
-            border_color="#FFFFFF",
-            state="disabled"
-        )
-        self.btn_export.pack(side="left", padx=10)
+        self.txt_email = QTextEdit()
+        self.txt_email.setFont(QFont("Consolas", 11))
+        layout.addWidget(self.txt_email)
+
+        btn_layout = QHBoxLayout()
+        self.btn_analyze = QPushButton("Escanear Amenazas")
+        self.btn_analyze.setObjectName("btnAnalyze")
+        self.btn_analyze.clicked.connect(self.analyze_email)
+        
+        self.btn_clear = QPushButton("Limpiar")
+        self.btn_clear.setObjectName("btnClear")
+        self.btn_clear.clicked.connect(self.clear_fields)
+        
+        self.btn_export = QPushButton("Exportar Reporte PDF")
+        self.btn_export.setObjectName("btnExport")
+        self.btn_export.setEnabled(False)
+        self.btn_export.clicked.connect(self.export_to_pdf)
+
+        btn_layout.addWidget(self.btn_analyze)
+        btn_layout.addWidget(self.btn_clear)
+        btn_layout.addWidget(self.btn_export)
+        layout.addLayout(btn_layout)
 
         # Contenedor de resultados
-        self.frame_results = ctk.CTkFrame(self.tab_scan, fg_color="#1F0D38", corner_radius=15)
-        self.frame_results.pack(fill="both", expand=True, padx=20, pady=15)
+        self.result_container = QWidget()
+        self.result_container.setObjectName("resultContainer")
+        result_layout = QVBoxLayout(self.result_container)
         
-        self.lbl_score = ctk.CTkLabel(self.frame_results, text="Puntaje de Riesgo: -", font=ctk.CTkFont(family="Trebuchet MS", size=16))
-        self.lbl_score.pack(anchor="w", padx=15, pady=(15, 5))
+        self.lbl_score = QLabel("Puntaje de Riesgo: -")
+        self.lbl_score.setObjectName("scoreLabel")
         
-        self.lbl_risk = ctk.CTkLabel(self.frame_results, text="Nivel de Amenaza: -", font=ctk.CTkFont(family="Trebuchet MS", size=18, weight="bold"))
-        self.lbl_risk.pack(anchor="w", padx=15, pady=0)
+        self.lbl_risk = QLabel("Nivel de Amenaza: -")
+        self.lbl_risk.setObjectName("riskLabel")
         
-        self.txt_details = ctk.CTkTextbox(
-            self.frame_results, 
-            height=100, 
-            font=ctk.CTkFont(family="Consolas", size=12),
-            fg_color="#2D134D",
-            corner_radius=10
-        )
-        self.txt_details.pack(pady=15, padx=15, fill="x")
-        self.txt_details.configure(state="disabled")
+        self.txt_details = QTextEdit()
+        self.txt_details.setFont(QFont("Consolas", 10))
+        self.txt_details.setReadOnly(True)
+        
+        result_layout.addWidget(self.lbl_score)
+        result_layout.addWidget(self.lbl_risk)
+        result_layout.addWidget(self.txt_details)
+        
+        layout.addWidget(self.result_container)
 
     def build_history_tab(self):
-        frame_hist_buttons = ctk.CTkFrame(self.tab_history, fg_color="transparent")
-        frame_hist_buttons.pack(pady=10)
-
-        self.btn_refresh = ctk.CTkButton(
-            frame_hist_buttons, text="Actualizar Datos", command=self.load_history, 
-            fg_color="#00F0FF", text_color="#000000", hover_color="#80F8FF", corner_radius=20, font=("Trebuchet MS", 12, "bold")
-        )
-        self.btn_refresh.pack(side="left", padx=5)
-
-        self.btn_purge = ctk.CTkButton(
-            frame_hist_buttons, text="Purgar Historial Antiguo", command=self.purge_history, 
-            fg_color="#FF006E", hover_color="#FF4793", corner_radius=20, font=("Trebuchet MS", 12, "bold")
-        )
-        self.btn_purge.pack(side="left", padx=5)
+        layout = QVBoxLayout(self.tab_history)
         
-        headers_frame = ctk.CTkFrame(self.tab_history, fg_color="#361A5C", corner_radius=10)
-        headers_frame.pack(fill="x", padx=20, pady=(10, 5))
+        btn_layout = QHBoxLayout()
+        self.btn_refresh = QPushButton("Actualizar Datos")
+        self.btn_refresh.setObjectName("btnInfo")
+        self.btn_refresh.clicked.connect(self.load_history)
         
-        ctk.CTkLabel(headers_frame, text="Estado", width=90, anchor="w", font=ctk.CTkFont(family="Trebuchet MS", weight="bold"), text_color="#00F0FF").pack(side="left", padx=5)
-        ctk.CTkLabel(headers_frame, text="Origen", width=80, anchor="w", font=ctk.CTkFont(family="Trebuchet MS", weight="bold"), text_color="#00F0FF").pack(side="left")
-        ctk.CTkLabel(headers_frame, text="Remitente", width=220, anchor="w", font=ctk.CTkFont(family="Trebuchet MS", weight="bold"), text_color="#00F0FF").pack(side="left")
-        ctk.CTkLabel(headers_frame, text="Veredicto", width=150, anchor="w", font=ctk.CTkFont(family="Trebuchet MS", weight="bold"), text_color="#00F0FF").pack(side="left")
+        self.btn_purge = QPushButton("Purgar Historial Antiguo")
+        self.btn_purge.setObjectName("btnDanger")
+        self.btn_purge.clicked.connect(self.purge_history)
+        
+        btn_layout.addWidget(self.btn_refresh)
+        btn_layout.addWidget(self.btn_purge)
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
 
-        self.scroll_history = ctk.CTkScrollableFrame(self.tab_history, fg_color="transparent")
-        self.scroll_history.pack(fill="both", expand=True, padx=20, pady=5)
+        self.table = QTableWidget(0, 4)
+        self.table.setHorizontalHeaderLabels(["Estado", "Origen", "Remitente", "Veredicto"])
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        layout.addWidget(self.table)
         
         self.load_history()
 
-    def load_history(self):
-        for widget in self.scroll_history.winfo_children():
-            widget.destroy()
-        
-        try:
-            response = requests.get(self.history_url, timeout=5)
-            if response.status_code == 200:
-                historial = response.json()
-                if not historial:
-                    ctk.CTkLabel(self.scroll_history, text="No hay registros en la base de datos.", font=("Trebuchet MS", 13)).pack(pady=20)
-                    return
-
-                for item in historial:
-                    row = ctk.CTkFrame(self.scroll_history, fg_color="#1F0D38", corner_radius=8)
-                    row.pack(fill="x", pady=3)
-                    
-                    riesgo = item.get("risk_level", "Desconocido")
-                    # Colores neón para los veredictos
-                    color_riesgo = "#FF0055" if "CRÍTICO" in riesgo else ("#FFAA00" if "SOSPECHOSO" in riesgo else "#00FF66")
-
-                    raw_sender = item.get("sender", "Desconocido")
-                    if not raw_sender or not str(raw_sender).strip():
-                        raw_sender = "Desconocido"
-                    
-                    clean_sender = str(raw_sender).replace("\n", " ").replace("\r", "").strip()
-                    display_sender = clean_sender[:30] + "..." if len(clean_sender) > 30 else clean_sender
-
-                    ctk.CTkLabel(row, text=f"[{item.get('status')}]", width=90, anchor="w", font=("Trebuchet MS", 12)).pack(side="left", padx=5)
-                    ctk.CTkLabel(row, text=item.get("source"), width=80, anchor="w", text_color="#C77DFF", font=("Trebuchet MS", 12, "bold")).pack(side="left")
-                    ctk.CTkLabel(row, text=display_sender, width=220, anchor="w", font=("Trebuchet MS", 12)).pack(side="left")
-                    ctk.CTkLabel(row, text=riesgo, width=150, anchor="w", text_color=color_riesgo, font=("Trebuchet MS", 12, "bold")).pack(side="left")
-        except Exception:
-            ctk.CTkLabel(self.scroll_history, text="Error: Servidor ChainMail desconectado.", font=("Trebuchet MS", 13)).pack(pady=20)
-
-    def purge_history(self):
-        if messagebox.askyesno("Confirmar Purga", "¿Deseas eliminar los registros antiguos y conservar solo los 10 más recientes?"):
-            try:
-                response = requests.post(self.clear_history_url, timeout=5)
-                if response.status_code == 200:
-                    data = response.json()
-                    deleted = data.get("deleted", 0)
-                    messagebox.showinfo("Éxito", f"Se han depurado {deleted} registros antiguos de la base de datos.")
-                    self.load_history()
-                else:
-                    messagebox.showerror("Error", "No se pudo completar la purga.")
-            except Exception as e:
-                messagebox.showerror("Error", f"Fallo de conexión: {str(e)}")
-
     def analyze_email(self):
-        email_content = self.txt_email.get("1.0", ctk.END).strip()
-        if not email_content:
-            messagebox.showwarning("Advertencia", "El campo de texto está vacío.")
+        content = self.txt_email.toPlainText().strip()
+        if not content:
+            QMessageBox.warning(self, "Advertencia", "El campo de texto está vacío.")
             return
 
-        self.btn_analyze.configure(state="disabled", text="Analizando...")
-        self.btn_export.configure(state="disabled")
-        self.root.update()
+        self.btn_analyze.setEnabled(False)
+        self.btn_analyze.setText("Analizando...")
+        self.btn_export.setEnabled(False)
 
-        try:
-            payload = {"email_content": email_content, "source": "Manual"}
-            response = requests.post(self.api_url, json=payload, timeout=15)
-            
-            if response.status_code == 200:
-                self.last_scan_data = response.json()
-                self.display_results(self.last_scan_data)
-                self.btn_export.configure(state="normal") 
-            else:
-                messagebox.showerror("Error API", f"Código {response.status_code}")
-                
-        except Exception as e:
-            messagebox.showerror("Error", f"No se pudo conectar al motor: {str(e)}")
-        finally:
-            self.btn_analyze.configure(state="normal", text="Escanear Amenazas")
+        self.worker = AnalyzeWorker(self.api_url, content)
+        self.worker.finished.connect(self.display_results)
+        self.worker.error.connect(self.display_error)
+        self.worker.start()
 
     def display_results(self, data):
+        self.last_scan_data = data
+        self.btn_analyze.setEnabled(True)
+        self.btn_analyze.setText("Escanear Amenazas")
+        self.btn_export.setEnabled(True)
+
         score = data.get("score", 0)
         risk = data.get("risk_level", "DESCONOCIDO")
         details = data.get("details", [])
 
-        self.lbl_score.configure(text=f"Puntaje de Riesgo: {score}")
-        self.lbl_risk.configure(text=f"Nivel de Amenaza: {risk}")
+        self.lbl_score.setText(f"Puntaje de Riesgo: {score}")
+        self.lbl_risk.setText(f"Nivel de Amenaza: {risk}")
 
-        if risk == "CRÍTICO (Posible Phishing)":
-            self.lbl_risk.configure(text_color="#FF0055")
-        elif risk == "SOSPECHOSO":
-            self.lbl_risk.configure(text_color="#FFAA00")
+        if "CRÍTICO" in risk:
+            self.lbl_risk.setStyleSheet("color: #FF0055; font-weight: bold; font-size: 18px;")
+        elif "SOSPECHOSO" in risk:
+            self.lbl_risk.setStyleSheet("color: #FFAA00; font-weight: bold; font-size: 18px;")
         else:
-            self.lbl_risk.configure(text_color="#00FF66")
+            self.lbl_risk.setStyleSheet("color: #00FF66; font-weight: bold; font-size: 18px;")
 
-        self.txt_details.configure(state="normal")
-        self.txt_details.delete("1.0", ctk.END)
+        self.txt_details.clear()
         if not details:
-            self.txt_details.insert(ctk.END, "✓ No se detectaron anomalías heurísticas ni reportes en OSINT.\n")
+            self.txt_details.append("✓ No se detectaron anomalías heurísticas ni reportes en OSINT.")
         else:
             for idx, det in enumerate(details, 1):
-                self.txt_details.insert(ctk.END, f"[{idx}] {det}\n")
-        self.txt_details.configure(state="disabled")
+                self.txt_details.append(f"[{idx}] {det}")
+
+    def display_error(self, err_msg):
+        self.btn_analyze.setEnabled(True)
+        self.btn_analyze.setText("Escanear Amenazas")
+        QMessageBox.critical(self, "Error API", f"No se pudo conectar al motor:\n{err_msg}")
+
+    def clear_fields(self):
+        self.txt_email.clear()
+        self.lbl_score.setText("Puntaje de Riesgo: -")
+        self.lbl_risk.setText("Nivel de Amenaza: -")
+        self.lbl_risk.setStyleSheet("color: white; font-weight: bold; font-size: 18px;")
+        self.txt_details.clear()
+        self.btn_export.setEnabled(False)
+        self.last_scan_data = None
 
     def export_to_pdf(self):
         if not self.last_scan_data:
             return
 
-        file_path = filedialog.asksaveasfilename(
-            defaultextension=".pdf",
-            filetypes=[("Documentos PDF", "*.pdf")],
-            title="Guardar Reporte ChainMail",
-            initialfile=f"Reporte_ChainMail_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Guardar Reporte ChainMail", 
+            f"Reporte_ChainMail_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+            "Documentos PDF (*.pdf)"
         )
         
         if not file_path:
-            return 
+            return
 
         try:
             pdf = FPDF()
             pdf.add_page()
             
             pdf.set_font("helvetica", "B", 22)
-            pdf.set_text_color(157, 78, 221) # Morado oscuro para el PDF
+            pdf.set_text_color(157, 78, 221)
             pdf.cell(0, 15, "ChainMail: Reporte de Inteligencia", align="C", new_x="LMARGIN", new_y="NEXT")
             
             pdf.set_font("helvetica", "I", 10)
@@ -317,9 +250,9 @@ class PhishingAnalyzerGUI:
             if "CRÍTICO" in risk:
                 pdf.set_text_color(231, 76, 60)
             elif "SOSPECHOSO" in risk:
-                pdf.set_text_color(230, 126, 34) 
+                pdf.set_text_color(230, 126, 34)
             else:
-                pdf.set_text_color(46, 204, 113) 
+                pdf.set_text_color(46, 204, 113)
                 
             pdf.cell(0, 10, f"Veredicto Final: {risk}", new_x="LMARGIN", new_y="NEXT")
             pdf.ln(10)
@@ -345,30 +278,175 @@ class PhishingAnalyzerGUI:
             pdf.cell(0, 5, "Analista Principal: David Fernando Medina Neires", align="C", new_x="LMARGIN", new_y="NEXT")
 
             pdf.output(file_path)
-            messagebox.showinfo("Exportación Exitosa", f"El reporte ha sido guardado y formateado correctamente en:\n\n{file_path}")
+            QMessageBox.information(self, "Exportación Exitosa", f"Reporte guardado en:\n{file_path}")
 
         except Exception as e:
-            messagebox.showerror("Error Crítico", f"No se pudo generar el documento PDF:\n{str(e)}")
+            QMessageBox.critical(self, "Error Crítico", f"No se pudo generar el documento PDF:\n{str(e)}")
 
-    def clear_fields(self):
-        self.txt_email.delete("1.0", ctk.END)
-        self.lbl_score.configure(text="Puntaje de Riesgo: -")
-        self.lbl_risk.configure(text="Nivel de Amenaza: -", text_color=["gray10", "gray90"])
-        self.txt_details.configure(state="normal")
-        self.txt_details.delete("1.0", ctk.END)
-        self.txt_details.configure(state="disabled")
-        self.btn_export.configure(state="disabled")
-        self.last_scan_data = None
+    def load_history(self):
+        try:
+            response = requests.get(self.history_url, timeout=5)
+            if response.status_code == 200:
+                historial = response.json()
+                self.table.setRowCount(len(historial))
+                for row_idx, item in enumerate(historial):
+                    self.table.setItem(row_idx, 0, QTableWidgetItem(f"[{item.get('status')}]"))
+                    self.table.setItem(row_idx, 1, QTableWidgetItem(item.get("source")))
+                    
+                    sender = str(item.get("sender", "Desconocido")).replace("\n", " ")
+                    self.table.setItem(row_idx, 2, QTableWidgetItem(sender))
+                    
+                    riesgo = item.get("risk_level", "Desconocido")
+                    risk_item = QTableWidgetItem(riesgo)
+                    if "CRÍTICO" in riesgo:
+                        risk_item.setForeground(QColor("#FF0055"))
+                    elif "SOSPECHOSO" in riesgo:
+                        risk_item.setForeground(QColor("#FFAA00"))
+                    else:
+                        risk_item.setForeground(QColor("#00FF66"))
+                        
+                    self.table.setItem(row_idx, 3, risk_item)
+        except Exception:
+            pass
 
-    def on_closing(self):
+    def purge_history(self):
+        reply = QMessageBox.question(self, 'Confirmar Purga', 
+                                     '¿Eliminar registros antiguos y conservar solo los 10 más recientes?',
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, 
+                                     QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                response = requests.post(self.clear_history_url, timeout=5)
+                if response.status_code == 200:
+                    deleted = response.json().get("deleted", 0)
+                    QMessageBox.information(self, "Éxito", f"Se han depurado {deleted} registros.")
+                    self.load_history()
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Fallo de conexión: {str(e)}")
+
+    def apply_frutiger_aero_theme(self):
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #180A2B;
+            }
+            QLabel {
+                color: #FFFFFF;
+                font-family: "Trebuchet MS";
+                font-size: 14px;
+            }
+            #titleLabel {
+                color: #00F0FF;
+                font-size: 26px;
+                font-weight: bold;
+                margin-bottom: 15px;
+            }
+            #footerLabel {
+                color: #9D4EDD;
+                font-size: 12px;
+                font-style: italic;
+                margin-top: 10px;
+            }
+            #scoreLabel {
+                font-size: 16px;
+            }
+            #riskLabel {
+                font-size: 18px;
+                font-weight: bold;
+            }
+            QTextEdit {
+                background-color: #2D134D;
+                border: 2px solid #7B2CBF;
+                border-radius: 12px;
+                color: #E0AAFF;
+                padding: 10px;
+            }
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #9D4EDD, stop:1 #5A189A);
+                color: white;
+                border: 1px solid #E0AAFF;
+                border-radius: 15px;
+                padding: 8px 15px;
+                font-family: "Trebuchet MS";
+                font-weight: bold;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #C77DFF, stop:1 #7B2CBF);
+                border: 1px solid #FFFFFF;
+            }
+            QPushButton:pressed {
+                background: #3C096C;
+            }
+            QPushButton:disabled {
+                background: #361A5C;
+                color: #7B2CBF;
+                border: 1px solid #361A5C;
+            }
+            #btnAnalyze, #btnInfo {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #00F0FF, stop:1 #0077B6);
+                color: #03045E;
+                border: 1px solid #90E0EF;
+            }
+            #btnAnalyze:hover, #btnInfo:hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #90E0EF, stop:1 #0096C7);
+            }
+            #btnDanger, #btnClear {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #FF006E, stop:1 #C1121F);
+            }
+            #btnDanger:hover, #btnClear:hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #FF4D6D, stop:1 #780000);
+            }
+            QTabWidget::pane {
+                border: 2px solid #7B2CBF;
+                background-color: #241142;
+                border-radius: 10px;
+            }
+            QTabBar::tab {
+                background: #180A2B;
+                color: #7B2CBF;
+                border: 2px solid #361A5C;
+                border-bottom: none;
+                border-top-left-radius: 10px;
+                border-top-right-radius: 10px;
+                padding: 10px 25px;
+                font-family: "Trebuchet MS";
+                font-weight: bold;
+                font-size: 14px;
+            }
+            QTabBar::tab:selected {
+                background: #241142;
+                color: #00F0FF;
+                border: 2px solid #7B2CBF;
+                border-bottom: 2px solid #241142;
+            }
+            QTableWidget {
+                background-color: #1F0D38;
+                border: 2px solid #7B2CBF;
+                border-radius: 10px;
+                color: white;
+                gridline-color: #361A5C;
+                font-family: "Trebuchet MS";
+            }
+            QHeaderView::section {
+                background-color: #361A5C;
+                color: #00F0FF;
+                font-weight: bold;
+                border: none;
+                border-right: 1px solid #1F0D38;
+                padding: 6px;
+            }
+        """)
+
+    def closeEvent(self, event):
         try:
             requests.post(self.shutdown_url, timeout=1)
         except:
             pass
-        finally:
-            self.root.destroy()
+        event.accept()
 
-if __name__ == "__main__":
-    root = ctk.CTk()
-    app = PhishingAnalyzerGUI(root)
-    root.mainloop()
+def run_gui():
+    import sys
+    app = QApplication(sys.argv)
+    window = PhishingAnalyzerGUI()
+    window.show()
+    sys.exit(app.exec())

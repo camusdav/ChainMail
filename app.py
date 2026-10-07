@@ -80,20 +80,17 @@ def start_scanner():
     monitor.start_all(interval=30)
 
 if __name__ == '__main__':
-    # Previene creación de procesos fantasma al compilar con PyInstaller
     multiprocessing.freeze_support()
+    print("Iniciando ChainMail Master Node (Arquitectura Unificada con PyQt6)...")
     
-    print("Iniciando ChainMail Master Node (Arquitectura Unificada)...")
-    
-    # 1. Lanzar el servidor Flask en un hilo secundario (Daemon)
+    # 1. Lanzar el servidor Flask
     hilo_flask = threading.Thread(target=start_flask, daemon=True)
     hilo_flask.start()
     
-    # 2. Lanzar el Escudo IMAP en un hilo secundario (Daemon)
+    # 2. Lanzar el Escudo IMAP
     hilo_scanner = threading.Thread(target=start_scanner, daemon=True)
     hilo_scanner.start()
     
-    # 3. Lanzar la Interfaz Gráfica (Obligatoriamente en el hilo principal)
-    root = ctk.CTk()
-    app_gui = PhishingAnalyzerGUI(root)
-    root.mainloop()
+    # 3. Iniciar la Interfaz Gráfica PyQt6
+    from gui import run_gui
+    run_gui()
