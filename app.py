@@ -5,10 +5,6 @@ import multiprocessing
 from flask import Flask, request, jsonify
 from engine import AnalyzerEngine
 from mongo_client import DatabaseManager
-
-# Importamos los submódulos directamente en lugar de usar subprocess
-from gui import PhishingAnalyzerGUI
-import customtkinter as ctk
 from imap_scanner import MultiIMAPMonitor
 
 app = Flask(__name__)
@@ -31,7 +27,9 @@ def analyze_email():
         _, raw_html = engine.parser.get_body()
         
         headers = engine.parser.get_headers()
-        raw_sender = headers.get("From") or headers.get("from") or headers.get("FROM") or "Desconocido"
+        
+        # Le damos prioridad al remitente extraído por el escáner IMAP
+        raw_sender = data.get('sender') or headers.get("From") or headers.get("from") or headers.get("FROM") or "Desconocido"
         clean_sender = str(raw_sender).replace("\n", " ").replace("\r", "").strip()
         
         scan_id = db.save_analysis(
@@ -68,14 +66,10 @@ def shutdown():
     os._exit(0)
     return jsonify({"status": "apagando"}), 200
 
-# --- FUNCIONES PARA LOS HILOS SECUNDARIOS ---
-
 def start_flask():
-    """Ejecuta la API Backend silenciosamente."""
     app.run(port=5000, use_reloader=False)
 
 def start_scanner():
-    """Ejecuta el escudo IMAP silenciosamente."""
     monitor = MultiIMAPMonitor()
     monitor.start_all(interval=30)
 
@@ -83,14 +77,11 @@ if __name__ == '__main__':
     multiprocessing.freeze_support()
     print("Iniciando ChainMail Master Node (Arquitectura Unificada con PyQt6)...")
     
-    # 1. Lanzar el servidor Flask
     hilo_flask = threading.Thread(target=start_flask, daemon=True)
     hilo_flask.start()
     
-    # 2. Lanzar el Escudo IMAP
     hilo_scanner = threading.Thread(target=start_scanner, daemon=True)
     hilo_scanner.start()
     
-    # 3. Iniciar la Interfaz Gráfica PyQt6
     from gui import run_gui
     run_gui()
